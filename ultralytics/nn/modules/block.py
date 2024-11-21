@@ -1109,3 +1109,53 @@ class SCDown(nn.Module):
         return self.cv2(self.cv1(x))
 
 
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super(SEBlock, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y
+
+class DepthwiseSeparableConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
+        super(DepthwiseSeparableConv, self).__init__()
+        self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, groups=in_channels, bias=False)
+        self.pointwise = nn.Conv2d(in_channels, out_channels, 1, bias=False)
+
+    def forward(self, x):
+        x = self.depthwise(x)
+        x = self.pointwise(x)
+        return x
+
+
+class EnhancedC3k2(nn.Module):
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        super(EnhancedC3k2, self).__init__()
+        self.c = int(c2 * e)  # Channel squeeze
+        self.use_attention = True  # Flag for adding attention
+
+        # Using Depthwise Separable Convolutions and optional SEBlock
+        self.m = nn.ModuleList(
+            [DepthwiseSeparableConv(self.c, self.c, 3, 1, 1) if c3k else nn.Conv2d(self.c, self.c, 3, 1, 1)
+             for _ in range(n)]
+        )
+
+        if self.use_attention:
+            self.attention = SEBlock(self.c)  # Adding SEBlock
+
+    def forward(self, x):
+        for layer in self.m:
+            x = layer(x)
+        if self.use_attention:
+            x = self.attention(x)
+        return x
