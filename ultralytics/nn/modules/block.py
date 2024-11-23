@@ -1153,7 +1153,7 @@ class EnhancedC3k2(C2f):
             EnhancedC3k(self.c, self.c, 2, shortcut, g) if dsc else BottleneckWithSE(self.c, self.c, shortcut, g) for _ in range(n)
         )
 
-class EnhancedC3k(C3f):
+class EnhancedC3k(C3):
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
         """Initializes the C3k module with specified channels, number of layers, and configurations."""
         super().__init__(c1, c2, n, shortcut, g, e)
