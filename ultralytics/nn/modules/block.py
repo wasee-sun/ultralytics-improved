@@ -183,9 +183,22 @@ class SPPF(nn.Module):
 
     def forward(self, x):
         """Forward pass through Ghost Convolution block."""
-        y = [self.cv1(x)]
+        print('SPPF start')
+        y = self.cv1(x)
+        print(f"SPPF self.cv1 Shape: {y.shape}")
+        y = [y]
+        print(f"SPPF y (converted to list) len: {len(y)}")
+        print(f"SPPF self.m : {self.m}")
         y.extend(self.m(y[-1]) for _ in range(3))
-        return self.cv2(torch.cat(y, 1))
+        for i in range(len(y)):
+            print(f"C2f y{i} extend shape after self.m: {y[i].shape}")
+        y = torch.cat(y, 1)
+        print(f"SPPF cat shape: {y.shape}")
+        y = self.cv2(y)
+        print(f"SPPF cv2 shape: {y.shape}")
+        # return self.cv2(torch.cat(y, 1))
+        print("SPPF end")
+        return y
 
 
 class C1(nn.Module):
@@ -228,15 +241,33 @@ class C2f(nn.Module):
         """Initializes a CSP bottleneck with 2 convolutions and n Bottleneck blocks for faster processing."""
         super().__init__()
         self.c = int(c2 * e)  # hidden channels
-        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv1 = Conv(c1 , 2 * self.c, 1, 1)
         self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
         self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+        # self.m = nn.ModuleList(
+        #     C3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
+        # )
 
     def forward(self, x):
         """Forward pass through C2f layer."""
-        y = list(self.cv1(x).chunk(2, 1))
+        print("C2f start")
+        y = self.cv1(x)
+        print(f"C2f cv1 shape: {y.shape}")
+        y = list(y.chunk(2, 1))
+        for i in range(len(y)):
+            print(f"C2f y{i} chunk shape: {y[i].shape}")
+        # y = list(self.cv1(x).chunk(2, 1))
+        print(f"C2f self.m : {self.m}, len: {len(self.m)}")
         y.extend(m(y[-1]) for m in self.m)
-        return self.cv2(torch.cat(y, 1))
+        for i in range(len(y)):
+            print(f"C2f y{i} extend shape after self.m: {y[i].shape}")
+        y = torch.cat(y, 1)
+        print(f"C2f cat shape: {y.shape}")
+        y = self.cv2(y)
+        print(f"C2f cv2 shape: {y.shape}")
+        # return self.cv2(torch.cat(y, 1))
+        print("C2f end")
+        return y
 
     def forward_split(self, x):
         """Forward pass using split() instead of chunk()."""
@@ -260,7 +291,21 @@ class C3(nn.Module):
 
     def forward(self, x):
         """Forward pass through the CSP bottleneck with 2 convolutions."""
-        return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+        print("C3 start using c3k")
+        y = self.cv1(x)
+        print(f"C3 cv1 shape: {y.shape}")
+        print(f"C3 self.m : {self.m}, len: {len(self.m)}")
+        y = self.m(y)
+        print(f"C3 self.m shape: {y.shape}")
+        z = self.cv2(x)
+        print(f"C3 cv2 shape: {z.shape}")
+        y = torch.cat((y, z), 1)
+        print(f"C3 cat shape: {y.shape}")
+        y = self.cv3(y)
+        print(f"C3 cv3 shape: {y.shape}")
+        # return self.cv3(torch.cat((self.m(self.cv1(x)), self.cv2(x)), 1))
+        print("C3 end")
+        return y
 
 
 class C3x(C3):
@@ -344,7 +389,20 @@ class Bottleneck(nn.Module):
 
     def forward(self, x):
         """Applies the YOLO FPN to input data."""
-        return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
+        print("Bottleneck c2f start")
+        y = self.cv1(x)
+        print(f"cv1 shape: {y.shape}")
+        y = self.cv2(y)
+        print(f"cv2 shape: {y.shape}")
+        if self.add:
+            y = x + y
+            print(f"input + cv2 if self.add shape: {y.shape}")
+            return y
+        else:
+            print(f"cv2 shape if not self.add: {y.shape}")
+            print("Bottleneck c2f end")
+            return y
+        # return x + self.cv2(self.cv1(x)) if self.add else self.cv2(self.cv1(x))
 
 
 class BottleneckCSP(nn.Module):
@@ -952,8 +1010,26 @@ class PSABlock(nn.Module):
 
     def forward(self, x):
         """Executes a forward pass through PSABlock, applying attention and feed-forward layers to the input tensor."""
-        x = x + self.attn(x) if self.add else self.attn(x)
-        x = x + self.ffn(x) if self.add else self.ffn(x)
+        print('PSABlock start')
+        if self.add:
+            y = x + self.attn(x)
+            print(f"PSABlock x self.add true, x + self.attn used shape: {y.shape}")
+            x = y
+        else:
+            y = self.attn(x)
+            print(f"PSABlock x self.add false, self.attn used shape: {y.shape}")
+            x = y
+        if self.add:
+            y = x + self.ffn(y)
+            print(f"PSABlock x self.add true, x + self.ffn used shape: {y.shape}")
+            x = y
+        else:
+            y = self.ffn(y)
+            print(f"PSABlock x self.add false, self.ffn used shape: {y.shape}")
+            x = y
+        # x = x + self.attn(x) if self.add else self.attn(x)
+        # x = x + self.ffn(x) if self.add else self.ffn(x)
+        print('PSABlock end')
         return x
 
 
@@ -1037,9 +1113,23 @@ class C2PSA(nn.Module):
 
     def forward(self, x):
         """Processes the input tensor 'x' through a series of PSA blocks and returns the transformed tensor."""
-        a, b = self.cv1(x).split((self.c, self.c), dim=1)
+        print('C2PSA start')
+        y = self.cv1(x)
+        print(f"C2PSA cv1 shape: {y.shape}")
+        # a, b = self.cv1(x).split((self.c, self.c), dim=1)
+        print(f"C2PSA self.c : {self.c}")
+        a, b = y.split((self.c, self.c), dim=1)
+        print(f"C2PSA a shape: {a.shape}, b shape: {b.shape}")
+        print(f"C2PSA self.m : {self.m}, len: {len(self.m)}")
         b = self.m(b)
-        return self.cv2(torch.cat((a, b), 1))
+        print(f"C2PSA b after self.m shape: {b.shape}")
+        y = torch.cat((a, b), 1)
+        print(f"C2PSA cat shape: {y.shape}")
+        y = self.cv2(y)
+        print(f"C2PSA cv2 shape: {y.shape}")
+        # return self.cv2(torch.cat((a, b), 1))
+        print('C2PSA end')
+        return y
 
 
 class C2fPSA(C2f):
@@ -1126,36 +1216,42 @@ class SEBlock(nn.Module):
         y = self.fc(y).view(b, c, 1, 1)
         return x * y
 
-class DepthwiseSeparableConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0):
-        super(DepthwiseSeparableConv, self).__init__()
-        self.depthwise = nn.Conv2d(in_channels, in_channels, kernel_size, stride, padding, groups=in_channels, bias=False)
-        self.pointwise = nn.Conv2d(in_channels, out_channels, 1, bias=False)
+class BottleneckWithSE(nn.Module):
+    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5, reduction=16):
+        super(BottleneckWithSE, self).__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+        self.add = shortcut and c1 == c2
+        self.se = SEBlock(c2, reduction=reduction)  # Adding SEBlock
 
     def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        return x
+        print("BottleneckSE c2f start")
+        print(f"input shape: {x.shape}")
+        y = self.cv1(x)  # First convolution
+        print(f"cv1 shape: {y.shape}")
+        y = self.cv2(y)  # Second convolution
+        print(f"cv2 shape: {y.shape}")
+        if self.add:
+            y = x + y  # Residual connection
+            print(f"input + cv2 if self.add shape: {y.shape}")
+        y = self.se(y)  # Apply SEBlock
+        print(f"SEBlock shape: {y.shape}")
+        print("BottleneckSE c2f end")
+        return y
 
-
-class EnhancedC3k2(nn.Module):
-    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
-        super(EnhancedC3k2, self).__init__()
-        self.c = int(c2 * e)  # Channel squeeze
-        self.use_attention = True  # Flag for adding attention
-
+class EnhancedC3k2(C2f):
+    def __init__(self, c1, c2, n=1, dsc=False, e=0.5, g=1, shortcut=True):
+        super().__init__(c1, c2, n, shortcut, g, e)
         # Using Depthwise Separable Convolutions and optional SEBlock
         self.m = nn.ModuleList(
-            [DepthwiseSeparableConv(self.c, self.c, 3, 1, 1) if c3k else nn.Conv2d(self.c, self.c, 3, 1, 1)
-             for _ in range(n)]
+            EnhancedC3k(self.c, self.c, 2, shortcut, g) if dsc else BottleneckWithSE(self.c, self.c, shortcut, g) for _ in range(n)
         )
 
-        if self.use_attention:
-            self.attention = SEBlock(self.c)  # Adding SEBlock
-
-    def forward(self, x):
-        for layer in self.m:
-            x = layer(x)
-        if self.use_attention:
-            x = self.attention(x)
-        return x
+class EnhancedC3k(C3f):
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
+        """Initializes the C3k module with specified channels, number of layers, and configurations."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)  # hidden channels
+        # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(BottleneckWithSE(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))

@@ -1,0 +1,20 @@
+path: ../datasets/rsud20k # dataset root dir
+train: images/train # train images (relative to 'path') 4 images
+val: images/val # val images (relative to 'path') 4 images
+test: # test images (optional)
+
+# Classes
+names:
+  0: person
+  1: rickshaw
+  2: rickshaw van
+  3: auto rickshaw
+  4: truck
+  5: pickup truck
+  6: private car
+  7: motorcycle
+  8: bicycle
+  9: bus
+  10: micro bus
+  11: covered van
+  12: human hauler
