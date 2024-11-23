@@ -49,6 +49,10 @@ __all__ = (
     "Attention",
     "PSA",
     "SCDown",
+    "SEBlock",
+    "BottleneckWithSE",
+    "EnhancedC3k",
+    "EnhancedC3k2",
 )
 
 
@@ -1107,3 +1111,52 @@ class SCDown(nn.Module):
     def forward(self, x):
         """Applies convolution and downsampling to the input tensor in the SCDown module."""
         return self.cv2(self.cv1(x))
+
+class SEBlock(nn.Module):
+    def __init__(self, channels, reduction=16):
+        super(SEBlock, self).__init__()
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(channels, channels // reduction, bias=False),
+            nn.ReLU(inplace=True),
+            nn.Linear(channels // reduction, channels, bias=False),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _, _ = x.size()
+        y = self.avg_pool(x).view(b, c)
+        y = self.fc(y).view(b, c, 1, 1)
+        return x * y
+
+class BottleneckWithSE(nn.Module):
+    def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5, reduction=16):
+        super(BottleneckWithSE, self).__init__()
+        c_ = int(c2 * e)  # hidden channels
+        self.cv1 = Conv(c1, c_, k[0], 1)
+        self.cv2 = Conv(c_, c2, k[1], 1, g=g)
+        self.add = shortcut and c1 == c2
+        self.se = SEBlock(c2, reduction=reduction)  # Adding SEBlock
+
+    def forward(self, x):
+        y = self.cv1(x)  # First convolution
+        y = self.cv2(y)  # Second convolution
+        if self.add:
+            y = x + y  # Residual connection
+        y = self.se(y)  # Apply SEBlock
+        return y
+
+class EnhancedC3k2(C2f):
+    def __init__(self, c1, c2, n=1, dsc=False, e=0.5, g=1, shortcut=True):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            EnhancedC3k(self.c, self.c, 2, shortcut, g) if dsc else BottleneckWithSE(self.c, self.c, shortcut, g) for _ in range(n)
+        )
+
+class EnhancedC3k(C3f):
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
+        """Initializes the C3k module with specified channels, number of layers, and configurations."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)  # hidden channels
+        # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(BottleneckWithSE(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
