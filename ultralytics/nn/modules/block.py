@@ -1159,8 +1159,7 @@ class EnhancedSPPF(nn.Module):
         super(EnhancedSPPF, self).__init__()
         c_ = c1 // 2
         self.cv1 = Conv(c1, c_, 1, 1)
-        self.cv2 = Conv(c_ * (len(k_sizes)), c_, 1, 1)
-        self.cv3 = Conv(c_ * (len(k_sizes) + 2), c2, 1, 1)
+        self.cv2 = Conv(c_ * (len(k_sizes) + 1), c2, 1, 1)
 
         self.pools = nn.ModuleList([
             nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2) for k in k_sizes
@@ -1172,15 +1171,11 @@ class EnhancedSPPF(nn.Module):
         """
         Forward pass through Pyramid Pooling Module.
         """
-        y = self.cv1(x)
-        y = [y]
+        y = [self.cv1(x)]
         # Apply pooling at different scales
         y.extend(pool(y[-1]) for pool in self.pools)
-        z = torch.cat(y[1:], dim=1)
-        z = self.cv2(z)
-        y.extend([z])
         y = torch.cat(y, dim=1)
-        y = self.cv3(y)
+        y = self.cv2(y)
         return y
 
 class SEBlock(nn.Module):
