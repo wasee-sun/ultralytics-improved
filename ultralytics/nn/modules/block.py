@@ -16,6 +16,7 @@ __all__ = (
     "HGStem",
     "SPP",
     "SPPF",
+    "AASSPP",
     "C1",
     "C2",
     "C3",
@@ -30,6 +31,7 @@ __all__ = (
     "GhostBottleneck",
     "Bottleneck",
     "BottleneckCSP",
+    "BottleneckWithSE",
     "Proto",
     "RepC3",
     "ResNetLayer",
@@ -41,6 +43,7 @@ __all__ = (
     "CBFuse",
     "CBLinear",
     "C3k2",
+    "EnhancedC3k2",
     "C2fPSA",
     "C2PSA",
     "RepVGGDW",
@@ -1198,6 +1201,47 @@ class SCDown(nn.Module):
         """Applies convolution and downsampling to the input tensor in the SCDown module."""
         return self.cv2(self.cv1(x))
 
+class AASSPP(nn.Module):
+    def __init__(self, in_channels, out_channels, dilation_rates=[1, 6, 12, 18]):
+        super(AASSPP, self).__init__()
+
+        self.dilations = dilation_rates
+        self.convolutions = nn.ModuleList([
+            Conv(in_channels, out_channels, k=3, p=dilation, d=dilation)
+            for dilation in self.dilations
+        ])
+
+        # Global average pooling
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        # A 1x1 convolution to match the number of channels after concatenation
+        self.conv_1x1 = Conv(in_channels * (len(dilation_rates) + 1), out_channels, k=1)
+
+    def forward(self, x):
+        print('AASSPP start')
+        print(f"AASSPP input shape: {x.shape}")
+        # Apply convolutions with different dilation rates
+        features = [conv(x) for conv in self.convolutions]
+        for feature in features:
+            print(f"Feature convulation shape: {feature.shape}")
+
+        # Apply global average pooling for global context
+        global_feature = self.global_avg_pool(x)
+        print(f"Global feature shape: {global_feature.shape}")
+        global_feature = F.interpolate(global_feature, size=x.size()[2:], mode='bilinear', align_corners=False)
+        print(f"Global feature interpolation shape: {global_feature.shape}")
+
+        # Concatenate the dilated features and global feature
+        features.append(global_feature)
+        out = torch.cat(features, dim=1)
+        print(f"AASSPP concated out shape: {out.shape}")
+
+        # Apply a 1x1 convolution to reduce the number of channels
+        out = self.conv_1x1(out)
+        print(f"AASSPP 1x1 out shape: {out.shape}")
+        print("AASSPP end")
+
+        return out
 
 class SEBlock(nn.Module):
     def __init__(self, channels, reduction=16):
