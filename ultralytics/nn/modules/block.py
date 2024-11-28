@@ -49,6 +49,7 @@ __all__ = (
     "Attention",
     "PSA",
     "SCDown",
+    "AASSPP",
     "SEBlock",
     "BottleneckWithSE",
     "EnhancedC3k",
@@ -1111,6 +1112,39 @@ class SCDown(nn.Module):
     def forward(self, x):
         """Applies convolution and downsampling to the input tensor in the SCDown module."""
         return self.cv2(self.cv1(x))
+
+class AASSPP(nn.Module):
+    def __init__(self, in_channels, out_channels, dilation_rates=[1, 6, 12, 18]):
+        super(AASSPP, self).__init__()
+
+        self.dilations = dilation_rates
+        self.convolutions = nn.ModuleList([
+            Conv(in_channels, out_channels, k=3, p=dilation, d=dilation)
+            for dilation in self.dilations
+        ])
+
+        # Global average pooling
+        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
+
+        # A 1x1 convolution to match the number of channels after concatenation
+        self.conv_1x1 = Conv(in_channels * (len(dilation_rates) + 1), out_channels, k=1)
+
+    def forward(self, x):
+        # Apply convolutions with different dilation rates
+        features = [conv(x) for conv in self.convolutions]
+
+        # Apply global average pooling for global context
+        global_feature = self.global_avg_pool(x)
+        global_feature = F.interpolate(global_feature, size=x.size()[2:], mode='bilinear', align_corners=False)
+
+        # Concatenate the dilated features and global feature
+        features.append(global_feature)
+        out = torch.cat(features, dim=1)
+
+        # Apply a 1x1 convolution to reduce the number of channels
+        out = self.conv_1x1(out)
+
+        return out
 
 class SEBlock(nn.Module):
     def __init__(self, channels, reduction=16):
