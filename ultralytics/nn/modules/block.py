@@ -16,6 +16,7 @@ __all__ = (
     "HGStem",
     "SPP",
     "SPPF",
+    "EnhancedSPPF",
     "C1",
     "C2",
     "C3",
@@ -1145,6 +1146,42 @@ class AASSPP(nn.Module):
         out = self.conv_1x1(out)
 
         return out
+
+
+class EnhancedSPPF(nn.Module):
+    def __init__(self, c1, c2, k_sizes=[5, 9, 13]):
+        """
+        Parameters:
+        - in_channels (int): Number of input channels.
+        - out_channels (int): Number of output channels after pooling and concatenation.
+        - kernel_sizes (list): List of pooling kernel sizes at different scales.
+        """
+        super(EnhancedSPPF, self).__init__()
+        c_ = c1 // 2
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * (len(k_sizes)), c_, 1, 1)
+        self.cv3 = Conv(c_ * (len(k_sizes) + 2), c2, 1, 1)
+
+        self.pools = nn.ModuleList([
+            nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2) for k in k_sizes
+        ])
+
+        # Convolution to match the output channels after concatenation
+
+    def forward(self, x):
+        """
+        Forward pass through Pyramid Pooling Module.
+        """
+        y = self.cv1(x)
+        y = [y]
+        # Apply pooling at different scales
+        y.extend(pool(y[-1]) for pool in self.pools)
+        z = torch.cat(y[1:], dim=1)
+        z = self.cv2(z)
+        y.extend([z])
+        y = torch.cat(y, dim=1)
+        y = self.cv3(y)
+        return y
 
 class SEBlock(nn.Module):
     def __init__(self, channels, reduction=16):
