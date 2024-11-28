@@ -17,6 +17,7 @@ __all__ = (
     "SPP",
     "SPPF",
     "AASSPP",
+    "EnhancedSPPF",
     "C1",
     "C2",
     "C3",
@@ -1242,6 +1243,57 @@ class AASSPP(nn.Module):
         print("AASSPP end")
 
         return out
+
+class EnhancedSPPF(nn.Module):
+    def __init__(self, c1, c2, k_sizes=[5, 9, 13]):
+        """
+        Pyramid Pooling Module (PPM) for context aggregation across multiple scales.
+
+        Parameters:
+        - in_channels (int): Number of input channels.
+        - out_channels (int): Number of output channels after pooling and concatenation.
+        - kernel_sizes (list): List of pooling kernel sizes at different scales.
+        """
+        super(EnhancedSPPF, self).__init__()
+        c_ = c1 // 2
+        self.cv1 = Conv(c1, c_, 1, 1)
+        self.cv2 = Conv(c_ * (len(k_sizes)), c_, 1, 1)
+        self.cv3 = Conv(c_ * (len(k_sizes) + 2), c2, 1, 1)
+
+        self.pools = nn.ModuleList([
+            nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2) for k in k_sizes
+        ])
+
+        # Convolution to match the output channels after concatenation
+
+    def forward(self, x):
+        """
+        Forward pass through Pyramid Pooling Module.
+        """
+        print('EnhancedSPPF start')
+        print('EnhancedSPPF input shape: ', x.shape)
+        y = self.cv1(x)
+        print('EnhancedSPPF conv1 shape: ', y.shape)
+        y = [y]
+        print('EnhancedSPPF pool: ', self.pools)
+        # Apply pooling at different scales
+        y.extend(pool(y[-1]) for pool in self.pools)
+        for i in range(len(y)):
+            print(f"EnhancedSPPF pool {i} shape: {y[i].shape}")
+        z = torch.cat(y[1:], dim=1)
+        print('EnhancedSPPF cat conv2 shape: ', z.shape)
+        z = self.cv2(z)
+        print('EnhancedSPPF conv2 shape: ', z.shape)
+        y.extend([z])
+        for i in range(len(y)):
+            print(f"EnhancedSPPF cat {i} shape: {y[i].shape}")
+        y = torch.cat(y, dim=1)
+        print('EnhancedSPPF cat conv3 shape: ', y.shape)
+        y = self.cv3(y)
+        print('EnhancedSPPF conv3 shape: ', y.shape)
+        print('EnhancedSPPF end')
+
+        return y
 
 class SEBlock(nn.Module):
     def __init__(self, channels, reduction=16):
