@@ -1332,9 +1332,9 @@ class AdvancedEMA(nn.Module):
         print(f"AdvancedEMA g_norm shape: {g_norm.shape}")
 
         # Average pooling over spatial dimensions
-        g_avg_pool = F.adaptive_avg_pool2d(g_norm, (8, 8))  # (B, C, 1, W)
+        g_avg_pool = F.adaptive_avg_pool2d(g_norm, (H, W))  # (B, C, 1, W)
         print(f"AdvancedEMA avg_pool shape: {g_avg_pool.shape}")
-        conv_3_3_avg_pool = F.adaptive_avg_pool2d(conv_3_3, (8, 8))  # (B, C, 1, W)
+        conv_3_3_avg_pool = F.adaptive_avg_pool2d(conv_3_3, (H, W))  # (B, C, 1, W)
         print(f"AdvancedEMA conv_3_3_avg_pool shape: {conv_3_3_avg_pool.shape}")
 
         # Softmax
