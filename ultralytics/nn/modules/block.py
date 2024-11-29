@@ -1347,7 +1347,7 @@ class EMA(nn.Module):
         print(f"EMA x_g_pool_softmax_reshaped shape: {x_g_pool_softmax_reshaped.shape}")
         matmul_1 = x_g_pool_softmax_reshaped * conv_3_3_groups
         print(f"EMA matmul_1 shape: {matmul_1.shape}")
-        conv_3_3_pool_reshaped = conv_3_3_pool.expand_as(conv_3_3_groups)  # (B, g, Cg, H, W)
+        conv_3_3_pool_reshaped = conv_3_3_pool_softmax.expand_as(conv_3_3_groups)  # (B, g, Cg, H, W)
         print(f"EMA conv_3_3_pool_reshaped shape: {conv_3_3_pool_reshaped.shape}")
         matmul_2 = conv_3_3_pool_reshaped * x_groups
         print(f"EMA matmul_2 shape: {matmul_2.shape}")
