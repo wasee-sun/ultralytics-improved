@@ -1294,7 +1294,7 @@ class EMA(nn.Module):
         print(f"EMA conv1x1 shape: {conv1x1.shape}")
 
         #Split the conv1x1 into two equal parts
-        x_attention, y_attention = torch.split(conv1x1, conv1x1.shape[3] // 2, dim=3)
+        x_attention, y_attention = torch.split(conv1x1, [W, H], dim=-1)
         print(f"EMA x_attention shape: {x_attention.shape}") # (B, C, 1, W)
         print(f"EMA y_attention shape: {y_attention.shape}") # (B, C, 1, H)
 
