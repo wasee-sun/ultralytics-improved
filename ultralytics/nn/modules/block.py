@@ -1459,3 +1459,68 @@ class EnhancedC3k(C3f):
         c_ = int(c2 * e)  # hidden channels
         # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
         self.m = nn.Sequential(*(BottleneckWithSE(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+
+
+class SEAttention(nn.Module):
+    def __init__(self, in_channels, reduction=16):
+        super(SEAttention, self).__init__()
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),  # Global pooling
+            nn.Conv2d(in_channels, in_channels // reduction, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels // reduction, in_channels, kernel_size=1),
+            nn.Sigmoid()  # Scale attention
+        )
+
+    def forward(self, x):
+        scale = self.se(x)
+        return x * scale  # Element-wise multiplication with attention
+
+
+
+class FPN(nn.Module):
+    def __init__(self, in_channels_list, out_channels):
+        super(FPN, self).__init__()
+        if isinstance(in_channels_list, int):
+            in_channels_list = [in_channels_list]
+        # Lateral connections to project input features to the same number of channels
+        self.lateral_convs = nn.ModuleList([
+            nn.Conv2d(in_ch, out_channels, kernel_size=1) for in_ch in in_channels_list
+        ])
+        # Convolutional layers for output features
+        self.output_convs = nn.ModuleList([
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1) for _ in in_channels_list
+        ])
+        # SE attention layers for each scale
+        self.se_blocks = nn.ModuleList([
+            SEAttention(out_channels) for _ in in_channels_list
+        ])
+
+    def forward(self, inputs):
+        """
+        Args:
+            inputs: List of feature maps from different stages of the backbone (e.g., ResNet).
+                    Example: [C3, C4, C5] with shapes [(B, C1, H1, W1), (B, C2, H2, W2), (B, C3, H3, W3)].
+        Returns:
+            List of enhanced feature maps at each scale.
+        """
+        # Step 1: Apply lateral connections
+        lateral_features = [lateral_conv(x) for lateral_conv, x in zip(self.lateral_convs, inputs)]
+
+        print(f"FPN lateral_features shape: {lateral_features[0].shape}")
+
+        # Step 2: Top-down pathway with feature upsampling and addition
+        fpn_features = [lateral_features[-1]]  # Start with the top level feature
+
+        print(f"FPN lateral_features shape: {lateral_features[0].shape}")
+
+        for i in range(len(lateral_features) - 2, -1, -1):  # Process from top to bottom
+            upsampled = F.interpolate(fpn_features[0], size=lateral_features[i].shape[2:], mode='nearest')
+            fpn_features.insert(0, lateral_features[i] + upsampled)
+
+        print(f"FPN fpn_features shape: {fpn_features[0].shape}")
+
+        # Step 3: Apply output convolutions and SE attention
+        outputs = [self.se_blocks[i](self.output_convs[i](feat)) for i, feat in enumerate(fpn_features)]
+        outputs = outputs.extend(outputs)
+        return outputs
