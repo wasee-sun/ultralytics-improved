@@ -1214,8 +1214,8 @@ class AdvancedEMA(nn.Module):
         g_norm = self.group_norm(reweighted.view(B, C, H, W))  # (B, C, H, W)
 
         # Average pooling over spatial dimensions
-        g_avg_pool = F.adaptive_avg_pool2d(g_norm, (8, 8))  # (B, C, 1, W)
-        conv_3_3_avg_pool = F.adaptive_avg_pool2d(conv_3_3, (8, 8))  # (B, C, 1, W)
+        g_avg_pool = F.adaptive_avg_pool2d(g_norm, (H, W))  # (B, C, 1, W)
+        conv_3_3_avg_pool = F.adaptive_avg_pool2d(conv_3_3, (H, W))  # (B, C, 1, W)
 
         # Softmax
         avg_pool_softmax = F.softmax(g_avg_pool, dim=-1)
