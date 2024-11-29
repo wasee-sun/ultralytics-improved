@@ -1147,7 +1147,7 @@ class AASSPP(nn.Module):
 
         return out
 
-class AdvancedEMA(nn.Module):
+class EMA(nn.Module):
     def __init__(self, in_channels, groups=4):
         """
         Efficient Multi-scale Attention block with cross-spatial learning.
@@ -1156,16 +1156,12 @@ class AdvancedEMA(nn.Module):
             in_channels (int): Number of input channels.
             groups (int): Number of groups for grouped attention.
         """
-        super(AdvancedEMA, self).__init__()
+        super(EMA, self).__init__()
         self.groups = groups
         self.group_channels = in_channels // groups
 
-        # Convolution layer for spatial attention
-        self.spatial_conv = Conv(in_channels, in_channels, k=1, s=1, p=0)
-        self.avg_pool = nn.AvgPool2d(kernel_size=1, stride=1)
-
         # Convolution layer for re-weighting
-        self.conv_1_1 = Conv(2 * in_channels, in_channels, k=1, s=1, p=0)
+        self.conv_1_1 = Conv(in_channels, in_channels, k=1, s=1, p=0)
         self.conv_3_3 = Conv(in_channels, in_channels, k=3, s=1, p=1, g=groups)
 
         # Group normalization
@@ -1173,63 +1169,72 @@ class AdvancedEMA(nn.Module):
 
     def forward(self, x):
         """
-        Forward pass of AdvancedEMA.
-
-        Args:
-            x (torch.Tensor): Input tensor of shape (B, C, H, W).
-
-        Returns:
-            torch.Tensor: Output tensor of shape (B, C, H, W).
+        Forward pass of EMA.
         """
         B, C, H, W = x.shape # 1, 256, 8, 8
         g = self.groups # 4
         Cg = self.group_channels # 64
+
+        # Conv 3X3
         conv_3_3 = self.conv_3_3(x)
 
-        # Step 1: Group split
-        x_groups = x.view(B, g, Cg, H, W)  # (B, g, Cg, H, W)
+        # Average pooling height width
+        x_avg_pool = F.adaptive_avg_pool2d(x, output_size=(1, W))  # (B, C, 1, W)
+        y_avg_pool = F.adaptive_avg_pool2d(x, output_size=(H, 1))  # (B, C, H, 1)
+        y_avg_pool = y_avg_pool.permute(0, 1, 3, 2)  # (B, C, 1, H)
 
-        # Step 2: Spatial attention (X and Y pooling)
-        x_avg = x_groups.mean(dim=3, keepdim=True)  # (B, g, Cg, 1, W) - Horizontal pooling
-        y_avg = x_groups.mean(dim=4, keepdim=True)  # (B, g, Cg, H, 1) - Vertical pooling
-        y_avg = y_avg.permute(0, 1, 2, 4, 3)  # Changing shape to [B, g, Cg, 1, H]
+        #contating x1 and y
+        concat_pool = torch.cat([x_avg_pool, y_avg_pool], dim=3)  # (B, C, H, W+H)
 
-        # Combine and compute spatial attention
-        spatial_attention = torch.cat([x_avg, y_avg], dim=4)  # (B, g, Cg, 1, W+H)
-        spatial_attention = spatial_attention.view(B, g * Cg, 1, W+H)
-        spatial_attention = self.spatial_conv(spatial_attention)  # (B*g, 1, H, W)
+        #conv layer
+        conv1x1 = self.conv_1_1(concat_pool)  # (B, g, 1, W+H)
 
-        # Group split
-        spatial_attention = spatial_attention.view(B, g, Cg, 1, W+H)  # (B, g, Cg, H, W)
-        spatial_attention = list(spatial_attention.chunk(2, 4))
-        spatial_attention[1] = spatial_attention[1].permute(0, 1, 2, 4, 3)
-        x_sigmoid = spatial_attention[0].sigmoid()
-        y_sigmoid = spatial_attention[1].sigmoid()
+        #Split the conv1x1 into two equal parts
+        x_attention, y_attention = torch.split(conv1x1, conv1x1.shape[3] // 2, dim=3)
 
-        # Reweight input with spatial attention
-        reweighted = x_sigmoid * y_sigmoid  # Element-wise multiplication
+        #Sigmoid
+        x_attention = torch.sigmoid(x_attention) # (B, C, 1, W)
+        y_attention = torch.sigmoid(y_attention) # (B, C, 1, H)
+        x_attention = x_attention.unsqueeze(2) # (B, C, 1, 1, W)
+        y_attention = y_attention.permute(0, 1, 3, 2).unsqueeze(3) # (B, C, H, 1, 1)
 
-        # Step 3: Cross-spatial learning
-        # Normalize
-        g_norm = self.group_norm(reweighted.view(B, C, H, W))  # (B, C, H, W)
+        #Reweight
+        x_reweighted = x * x_attention.squeeze(2) # (B, C, H, W)
+        x_reweighted = x * y_attention.squeeze(3) # (B, C, H, W)
 
-        # Average pooling over spatial dimensions
-        g_avg_pool = F.adaptive_avg_pool2d(g_norm, (H, W))  # (B, C, 1, W)
-        conv_3_3_avg_pool = F.adaptive_avg_pool2d(conv_3_3, (H, W))  # (B, C, 1, W)
+        #Group norm
+        x_GN_reweighted = self.group_norm(x_reweighted) # (B, C, H, W)
 
-        # Softmax
-        avg_pool_softmax = F.softmax(g_avg_pool, dim=-1)
-        conv_3_3_softmax = F.softmax(conv_3_3_avg_pool, dim=-1)
+        #Group formation
+        x_groups = x_GN_reweighted.view(B, g, Cg, H, W)  # (B, g, Cg, H, W)
+        conv_3_3_groups = conv_3_3.view(B, g, Cg, H, W)
 
-        # Matmul for cross-spatial relationships
-        matmul_1 = torch.matmul(avg_pool_softmax, conv_3_3)
-        matmul_2 = torch.matmul(g_norm, conv_3_3_softmax)
+        #Global pool
+        x_global_pool = F.adaptive_avg_pool2d(x_groups, output_size=(1, 1))  # (B, g, Cg, 1, 1)
+        conv_3_3_pool = F.adaptive_avg_pool2d(conv_3_3_groups, output_size=(1, 1))  # (B, g, Cg, 1, 1)
 
-        # Concatenate and sigmoid
-        final_concat = torch.cat([matmul_1, matmul_2], dim=1)
-        final_sigmoid = final_concat.sigmoid()
-        final_conv = self.conv_1_1(final_sigmoid)
-        return final_conv
+        #Softmax
+        x_g_pool_softmax = F.softmax(x_global_pool, dim=1)  # (B, g, Cg, 1, 1)
+        conv_3_3_pool_softmax = F.softmax(conv_3_3_pool, dim=1)  # (B, g, Cg, 1, 1)
+
+        #Matmul
+        x_g_pool_softmax_reshaped = x_g_pool_softmax.expand_as(x_groups)  # (B, g, Cg, H, W)
+        matmul_1 = x_g_pool_softmax_reshaped * conv_3_3_groups
+        conv_3_3_pool_reshaped = conv_3_3_pool_softmax.expand_as(conv_3_3_groups)  # (B, g, Cg, H, W)
+        matmul_2 = conv_3_3_pool_reshaped * x_groups
+
+        #Concat matmul and sigmoid
+        spatial_attention = matmul_1 + matmul_2  # (B, g, Cg, H, W)
+        spatial_attention = torch.sigmoid(spatial_attention)
+
+        # Adjust sigmoid shape
+        spatial_attention = spatial_attention.view(B, C, H, W)
+
+        # Reweight sigmoid matmul
+        x_reweighted = x * spatial_attention  # Element-wise multiplication (broadcasting across channels)
+
+        # Return the reweighted tensor
+        return x_reweighted
 
 class EnhancedSPPF(nn.Module):
     def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
@@ -1243,7 +1248,7 @@ class EnhancedSPPF(nn.Module):
         c_ = c1 // 2
         self.cv1 = Conv(c1, c_, 1, 1)
         self.cv2 = Conv(c_ * (len(k_sizes) + 1), c2, 1, 1)
-        self.adv_ema = AdvancedEMA(c1)
+        self.ema = EMA(c1)
         self.pools = nn.ModuleList([
             nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2) for k in k_sizes
         ])
@@ -1259,7 +1264,7 @@ class EnhancedSPPF(nn.Module):
         y.extend(pool(y[-1]) for pool in self.pools)
         y = torch.cat(y, dim=1)
         y = self.cv2(y)
-        y = self.adv_ema(y)
+        y = self.ema(y)
         return y
 
 class SEBlock(nn.Module):
