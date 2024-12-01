@@ -1318,5 +1318,4 @@ class EnhancedC3k(C3):
         """Cross convulation with kernel size k"""
         super().__init__(c1, c2, n, shortcut, g, e)
         self.c_ = int(c2 * e)  # hidden channels
-        # self.m = nn.Sequential(*(BottleneckWithSE(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
-        self.m = nn.Sequential(*(BottleneckWithSE(self.c_, self.c_, shortcut, g, k=((1, 3), (3, 1)), e=1) for _ in range(n)))
+        self.m = nn.Sequential(*(BottleneckWithSE(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
