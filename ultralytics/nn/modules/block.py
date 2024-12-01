@@ -47,6 +47,7 @@ __all__ = (
     "RepVGGDW",
     "CIB",
     "C2fCIB",
+    "CIBC2f",
     "Attention",
     "PSA",
     "SCDown",
@@ -1237,7 +1238,7 @@ class EMA(nn.Module):
         return x_reweighted
 
 class EnhancedSPPF(nn.Module):
-    def __init__(self, c1, c2, k_sizes=[1, 3, 5, 7]):
+    def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
         """
         Parameters:
         - in_channels (int): Number of input channels.
@@ -1303,17 +1304,45 @@ class BottleneckWithSE(nn.Module):
         y = self.se(y)  # Apply SEBlock
         return y
 
-class EnhancedC3k2(C2f):
-    def __init__(self, c1, c2, n=1, dsc=False, e=0.5, g=1, shortcut=True):
+class CIBC2f(nn.Module):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        """Initializes a CSP bottleneck with 2 convolutions and n Bottleneck blocks for faster processing."""
+        super().__init__()
+        self.c = int(c2 * e)  # hidden channels
+        self.cib = CIB(c1, c1, shortcut, e, lk=True)
+        self.cv1 = Conv(c1, 2 * self.c, 1, 1)
+        self.cv2 = Conv((2 + n) * self.c, c2, 1)  # optional act=FReLU(c2)
+        self.m = nn.ModuleList(Bottleneck(self.c, self.c, shortcut, g, k=((3, 3), (3, 3)), e=1.0) for _ in range(n))
+
+    def forward(self, x):
+        """Forward pass through C2f layer."""
+        y = self.cib(x)
+        y = list(self.cv1(y).chunk(2, 1))
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+    def forward_split(self, x):
+        """Forward pass using split() instead of chunk()."""
+        y = self.cv1(x).split((self.c, self.c), 1)
+        y = [y[0], y[1]]
+        y.extend(m(y[-1]) for m in self.m)
+        return self.cv2(torch.cat(y, 1))
+
+class EnhancedC3k2(CIBC2f):
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        # super().__init__(c1, c2, n, e, g, shortcut)
         super().__init__(c1, c2, n, shortcut, g, e)
         self.m = nn.ModuleList(
-            EnhancedC3k(self.c, self.c, 2, shortcut, g) if dsc else BottleneckWithSE(self.c, self.c, shortcut, g) for _ in range(n)
+            EnhancedC3k(self.c, self.c, 2, shortcut, g) if c3k else BottleneckWithSE(self.c, self.c, shortcut, g) for _ in range(n)
         )
 
 class EnhancedC3k(C3):
     def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
         """Initializes the C3k module with specified channels, number of layers, and configurations."""
+        """Cross convulation with kernel size k"""
         super().__init__(c1, c2, n, shortcut, g, e)
-        c_ = int(c2 * e)  # hidden channels
-        # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
-        self.m = nn.Sequential(*(BottleneckWithSE(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.c_ = int(c2 * e)  # hidden channels
+        # self.m = nn.Sequential(*(BottleneckWithSE(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(BottleneckWithSE(self.c_, self.c_, shortcut, g, k=((1, 3), (3, 1)), e=1) for _ in range(n)))
