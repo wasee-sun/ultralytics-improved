@@ -1236,32 +1236,8 @@ class EMA(nn.Module):
         # Return the reweighted tensor
         return x_reweighted
 
-# class EnhancedSPPF(nn.Module):
-#     def __init__(self, c1, c2, k=5):
-#         """
-#         Parameters:
-#         - in_channels (int): Number of input channels.
-#         - out_channels (int): Number of output channels after pooling and concatenation.
-#         - kernel_sizes (list): List of pooling kernel sizes at different scales.
-#         """
-#         super(EnhancedSPPF, self).__init__()
-#         c_ = c1 // 2  # hidden channels
-#         self.cv1 = Conv(c1, c_, 1, 1)
-#         self.cv2 = Conv(c_ * 4, c2, 1, 1)
-#         self.ema = EMA(c1)
-#         self.m = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
-
-#     def forward(self, x):
-#         """Forward pass through Ghost Convolution block."""
-#         y = [self.cv1(x)]
-#         y.extend(self.m(y[-1]) for _ in range(3))
-#         y = torch.cat(y, 1)
-#         y = self.cv2(y)
-#         y = self.ema(y)
-#         return y
-
 class EnhancedSPPF(nn.Module):
-    def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
+    def __init__(self, c1, c2, k_sizes=[1, 3, 5]):
         """
         Parameters:
         - in_channels (int): Number of input channels.
