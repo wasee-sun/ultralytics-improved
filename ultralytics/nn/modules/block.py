@@ -1237,7 +1237,7 @@ class EMA(nn.Module):
         return x_reweighted
 
 class EnhancedSPPF(nn.Module):
-    def __init__(self, c1, c2, k_sizes=[1, 3, 5]):
+    def __init__(self, c1, c2, k_sizes=[1, 3, 5, 7]):
         """
         Parameters:
         - in_channels (int): Number of input channels.
