@@ -47,7 +47,6 @@ __all__ = (
     "RepVGGDW",
     "CIB",
     "C2fCIB",
-    "CIBC2f",
     "Attention",
     "PSA",
     "SCDown",
