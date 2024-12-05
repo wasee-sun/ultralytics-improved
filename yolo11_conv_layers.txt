@@ -1,5 +1,9 @@
 SUN@Lenovo-Flex-5 MINGW64 ~/desktop/python/ultralytics-new/ultralytics-improved (feature-branch)
 $ yolo train model=ultralytics/cfg/models/11/yolo11.yaml data=ultralytics/cfg/datasets/coco8.yaml epochs=100 batch=16 imgsz=640 pretrained=False verbose=True
+
+sahil@DESKTOP-80OIBSK MINGW64 ~/Desktop/Python/ultalytics/ultralytics-improved (enhancedc3k2-branch)
+$ yolo train model=ultralytics/cfg/models/11/yolo11.yaml data=ultralytics/cfg/datasets/rsud20k-sahil.yaml epochs=100 batch=16 imgsz=640 pretrained=False verbose=True
+
 WARNING ⚠️ no model scale passed. Assuming scale='n'.
 Conv start
 Input conv Shape: torch.Size([1, 3, 256, 256])
