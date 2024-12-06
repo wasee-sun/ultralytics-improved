@@ -16,6 +16,7 @@ __all__ = (
     "HGStem",
     "SPP",
     "SPPF",
+    "EMA",
     "EnhancedSPPF",
     "SPPFKELANEMA",
     "C1",
