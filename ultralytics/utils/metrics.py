@@ -128,7 +128,7 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
         return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
     return iou  # IoU
 
-def bbox_iou_log(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+def bbox_iou_log(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, small_box_threshold=0.01, eps=1e-7):
     """
     Calculate Intersection over Union (IoU) of box1(1, 4) to box2(n, 4).
 
@@ -163,7 +163,7 @@ def bbox_iou_log(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=
     ).clamp_(0)
 
     # Union Area
-    union = w1 * h1 + w2 * h2 - inter + eps
+    union = (w1 * h1 + w2 * h2 - inter).clamp(min=eps)
 
     # IoU
     iou = inter / union
@@ -178,11 +178,19 @@ def bbox_iou_log(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=
 
             if CIoU:
                 # Improved aspect ratio penalty using logarithmic differences
-                v = (1 / 2) * ((torch.log(w1 / w2 + eps).pow(2)) + (torch.log(h1 / h2 + eps).pow(2)))
-
+                v = ((torch.log(w1 / h1 + eps) + torch.log(w2 / h2 + eps)) ** 2)
+                
                 # Alpha term to balance between IoU and aspect ratio penalty
                 with torch.no_grad():
-                    alpha = v / (v + (1 - iou + eps))
+                    alpha = v / (v - iou + 1 + eps)
+
+                # Small box penalty
+                box_area = w2 * h2
+                size_factor = torch.maximum(
+                    torch.tensor(1.0), small_box_threshold / (box_area + eps)
+                )
+                
+                rho2 = rho2 * size_factor
 
                 # Complete IoU with improved penalty
                 return iou - (rho2 / c2 + alpha * v)
