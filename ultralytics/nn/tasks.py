@@ -43,6 +43,7 @@ from ultralytics.nn.modules import (
     Classify,
     Concat,
     Conv,
+    CondConv,
     Conv2,
     ConvTranspose,
     Detect,
@@ -205,7 +206,7 @@ class BaseModel(nn.Module):
         """
         if not self.is_fused():
             for m in self.model.modules():
-                if isinstance(m, (Conv, Conv2, DWConv)) and hasattr(m, "bn"):
+                if isinstance(m, (Conv, CondConv, Conv2, DWConv)) and hasattr(m, "bn"):
                     if isinstance(m, Conv2):
                         m.fuse_convs()
                     m.conv = fuse_conv_and_bn(m.conv, m.bn)  # update conv
@@ -956,6 +957,11 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         if verbose:
             LOGGER.info(f"{colorstr('activation:')} {act}")  # print
 
+    if act:
+        CondConv.default_act = eval(act)  # redefine default activation, i.e. Conv.default_act = nn.SiLU()
+        if verbose:
+            LOGGER.info(f"{colorstr('activation:')} {act}")  # print
+
     if verbose:
         LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
     ch = [ch]
@@ -972,6 +978,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         if m in {
             Classify,
             Conv,
+            CondConv,
             ConvTranspose,
             GhostConv,
             Bottleneck,

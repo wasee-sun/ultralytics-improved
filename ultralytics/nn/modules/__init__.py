@@ -66,6 +66,7 @@ from .conv import (
     ChannelAttention,
     Concat,
     Conv,
+    CondConv,
     Conv2,
     ConvTranspose,
     DWConv,
@@ -92,6 +93,7 @@ from .transformer import (
 
 __all__ = (
     "Conv",
+    "CondConv",
     "Conv2",
     "LightConv",
     "RepConv",

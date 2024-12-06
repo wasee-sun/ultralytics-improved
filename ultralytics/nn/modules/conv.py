@@ -10,6 +10,7 @@ import torch.nn as nn
 __all__ = (
     "Conv",
     "Conv2",
+    "CondConv",
     "LightConv",
     "DWConv",
     "DWConvTranspose2d",
@@ -61,6 +62,80 @@ class Conv(nn.Module):
     def forward_fuse(self, x):
         """Perform transposed convolution of 2D data."""
         return self.act(self.conv(x))
+    
+class CondConv(nn.Module):
+    """
+    Conditional Convolution Block:
+    Learns multiple sets of convolutional weights and dynamically selects the most relevant ones based on the input.
+    """
+
+    default_act = nn.SiLU()  # default activation
+
+    def __init__(self, c1, c2, k=1, s=1, p=None, g=1, d=1, num_weights=4, act=True):
+        """
+        Initialize the ConditionalConv block.
+        
+        Args:
+            c1 (int): Number of input channels.
+            c2 (int): Number of output channels.
+            k (int): Kernel size of convolution.
+            s (int): Stride of convolution.
+            p (int): Padding of convolution. If None, computed automatically.
+            g (int): Groups for convolution.
+            d (int): Dilation of convolution.
+            num_weights (int): Number of convolutional weight sets.
+            act (bool or nn.Module): Activation function. Defaults to nn.SiLU if True.
+        """
+        super().__init__()
+        self.num_weights = num_weights
+        self.conv_weights = nn.ModuleList([
+            nn.Conv2d(c1, c2, k, s, autopad(k, p, d), groups=g, dilation=d, bias=False)
+            for _ in range(num_weights)
+        ])
+        self.bn = nn.BatchNorm2d(c2)
+        self.gating_network = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(c1, num_weights, kernel_size=1, bias=True),  # Outputs gating scores
+            nn.Softmax(dim=1)  # Normalize across the weight sets
+        )
+        self.act = self.default_act if act is True else act if isinstance(act, nn.Module) else nn.Identity()
+
+    def forward(self, x):
+        """
+        Forward pass for the ConditionalConv block.
+        Dynamically selects the most relevant convolutional weights based on the input.
+        
+        Args:
+            x (torch.Tensor): Input tensor of shape (batch_size, c1, height, width).
+        
+        Returns:
+            torch.Tensor: Output tensor after conditional convolution.
+        """
+        print("ConditionalConv start")
+        print(f"Input Shape: {x.shape}")
+        
+        # Generate gating scores
+        gating_scores = self.gating_network(x)  # Shape: (batch_size, num_weights, 1, 1)
+        print(f"Gating Scores Shape: {gating_scores.shape}")
+
+        # Apply convolutional weight sets
+        outputs = []
+        for i, conv in enumerate(self.conv_weights):
+            out = conv(x) * gating_scores[:, i:i+1, :, :]
+            outputs.append(out)
+            print(f"Weight {i} output Shape: {out.shape}")
+        
+        # Sum the weighted outputs
+        output = sum(outputs)  # Shape: (batch_size, c2, height, width)
+        print(f"Summed Output Shape: {output.shape}")
+
+        # Apply BatchNorm and activation
+        b = self.bn(output)
+        print(f"BatchNorm Output Shape: {b.shape}")
+        act = self.act(b)
+        print(f"Activated Output Shape: {act.shape}")
+        print("ConditionalConv end")
+        return act
 
 
 class Conv2(Conv):
