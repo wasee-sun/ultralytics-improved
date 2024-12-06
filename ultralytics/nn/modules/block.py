@@ -1298,7 +1298,7 @@ class SPPFKELANEMA(nn.Module):
         - kernel_sizes (list): List of pooling kernel sizes at different scales.
         """
         super().__init__()
-        self.c_ = c1 // 2
+        self.c_ = c1 // 4
         self.cv1 = Conv(c1, self.c_, 1, 1)
         self.branch1 = nn.Sequential(
             SPPFK(self.c_, k_sizes=[3, 5, 5]),
@@ -1312,8 +1312,7 @@ class SPPFKELANEMA(nn.Module):
             SPPFK(self.c_, k_sizes=[7, 5, 5]),
             Conv(self.c_ * 4, self.c_, 1, 1)
         )
-        self.ema = EMA(self.c_ * 4)
-        self.cv2 = Conv(self.c_ * 4, c2, 1, 1)
+        self.ema = EMA(c2)
 
         # Convolution to match the output channels after concatenation
 
@@ -1323,11 +1322,10 @@ class SPPFKELANEMA(nn.Module):
         """
         y = self.cv1(x)
         y1 = self.branch1(y)
-        y2 = self.branch2(y)
-        y3 = self.branch3(y)
+        y2 = self.branch2(y1)
+        y3 = self.branch3(y2)
         y = torch.cat((y, y1, y2, y3), 1)
         y = self.ema(y)
-        y = self.cv2(y)
 
         return y
 
