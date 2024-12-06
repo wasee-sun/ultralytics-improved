@@ -186,17 +186,10 @@ class GBS(nn.Module):
 
     def forward(self, x):
         """Forward propagation through a Ghost Bottleneck layer with skip connection."""
-        print("GBS start")
-        print(f"GBS input shape: {x.shape}")
         y = self.cv1(x)
-        print(f"GBS cv1 shape: {y.shape}")
         z = self.cv2(y)
-        print(f"GBS cv2 shape: {y.shape}")
         y = torch.cat((y, z), 1)
-        print(f"GBS cat shape: {y.shape}")
         y = self.act(self.bn(y))
-        print(f"GBS output shape: {y.shape}")
-        print("GBS end")
         return y
 
 class RepConv(nn.Module):
