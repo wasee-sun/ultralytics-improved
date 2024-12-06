@@ -17,6 +17,7 @@ __all__ = (
     "SPP",
     "SPPF",
     "EnhancedSPPF",
+    "SPPFKELANEMA",
     "C1",
     "C2",
     "C3",
@@ -1266,6 +1267,66 @@ class EnhancedSPPF(nn.Module):
         y = torch.cat(y, dim=1)
         y = self.cv2(y)
         y = self.ema(y)
+
+        return y
+    
+class SPPFK(nn.Module):
+    """Using single kernel size for spatial pyramid pooling."""
+    def __init__(self, c1, k_sizes=[3, 5, 7]):
+        super().__init__()
+        self.cv = Conv(c1, c1, 1, 1)
+        self.pool_layers = nn.ModuleList([
+            nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2) for k in k_sizes
+        ])
+
+    def forward(self, x):
+        y = [self.cv(x)]
+        pools = [pool(y[-1]) for pool in self.pool_layers]
+        y.extend(pools)
+        y = torch.cat(y, 1)
+        return y
+
+class SPPFKELANEMA(nn.Module):
+    def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
+        """
+        Pyramid Pooling Module (PPM) for context aggregation across multiple scales.
+
+        Parameters:
+        - in_channels (int): Number of input channels.
+        - out_channels (int): Number of output channels after pooling and concatenation.
+        - kernel_sizes (list): List of pooling kernel sizes at different scales.
+        """
+        super().__init__()
+        self.c_ = c1 // 2
+        self.cv1 = Conv(c1, self.c_, 1, 1)
+        self.branch1 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[3, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1)
+        )
+        self.branch2 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[5, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1)
+        )
+        self.branch3 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[7, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1)
+        )
+        self.ema = EMA(self.c_ * 4)
+        self.cv2 = Conv(self.c_ * 4, c2, 1, 1)
+
+        # Convolution to match the output channels after concatenation
+
+    def forward(self, x):
+        """
+        Forward pass through Pyramid Pooling Module.
+        """
+        y = self.cv1(x)
+        y1 = self.branch1(y)
+        y2 = self.branch2(y)
+        y3 = self.branch3(y)
+        y = torch.cat((y, y1, y2, y3), 1)
+        y = self.ema(y)
+        y = self.cv2(y)
 
         return y
 
