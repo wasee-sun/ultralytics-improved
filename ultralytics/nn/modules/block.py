@@ -18,6 +18,7 @@ __all__ = (
     "SPPF",
     "SPPFK",
     "AASSPP",
+    "EMA",
     "EnhancedSPPF",
     "SPPFKELANEMA",
     "C1",
