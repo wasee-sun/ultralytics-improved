@@ -16,6 +16,7 @@ __all__ = (
     "ConvTranspose",
     "Focus",
     "GhostConv",
+    "GBS",
     "ChannelAttention",
     "SpatialAttention",
     "CBAM",
