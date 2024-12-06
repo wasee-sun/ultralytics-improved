@@ -21,6 +21,7 @@ __all__ = (
     "EMA",
     "EnhancedSPPF",
     "SPPFKELANEMA",
+    "SPPFKELAN,"
     "C1",
     "C2",
     "C3",
@@ -48,6 +49,8 @@ __all__ = (
     "CBLinear",
     "C3k2",
     "EnhancedC3k2",
+    "GhostC3k2",
+    "FRM",
     "C2fPSA",
     "C2PSA",
     "RepVGGDW",
@@ -380,7 +383,9 @@ class GhostBottleneck(nn.Module):
 
     def forward(self, x):
         """Applies skip connection and concatenation to input tensor."""
-        return self.conv(x) + self.shortcut(x)
+        y = self.conv(x) + self.shortcut(x)
+        print(f"GhostBottleneck shape: {y.shape}")
+        return y
 
 
 class Bottleneck(nn.Module):
@@ -1395,7 +1400,7 @@ class SPPFK(nn.Module):
         print(f"SPPFK end")
         return y
 
-class SPPFKELANEMA(nn.Module):
+class SPPFKELAN(nn.Module):
     def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
         """
         Pyramid Pooling Module (PPM) for context aggregation across multiple scales.
@@ -1439,6 +1444,57 @@ class SPPFKELANEMA(nn.Module):
         print(f"SPPFKELANEMA branch3 y3 shape: {y3.shape}")
         y = torch.cat((y, y1, y2, y3), 1)
         print(f"SPPFKELANEMA y shape: {y.shape}")
+        print(f"SPPFKELANEMA end")
+
+        return y
+    
+class SPPFKELANEMA(nn.Module):
+    def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
+        """
+        Pyramid Pooling Module (PPM) for context aggregation across multiple scales.
+
+        Parameters:
+        - in_channels (int): Number of input channels.
+        - out_channels (int): Number of output channels after pooling and concatenation.
+        - kernel_sizes (list): List of pooling kernel sizes at different scales.
+        """
+        super().__init__()
+        self.c_ = c1 // 4
+        self.cv1 = Conv(c1, self.c_, 1, 1)
+        self.branch1 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[3, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1),
+        )
+        self.branch2 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[5, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1),
+        )
+        self.branch3 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[7, 7, 7]),
+            Conv(self.c_ * 4, self.c_, 1, 1),
+        )
+        self.ema = EMA(c2)
+
+        # Convolution to match the output channels after concatenation
+
+    def forward(self, x):
+        """
+        Forward pass through Pyramid Pooling Module.
+        """
+        print(f"SPPFKELANEMA start")
+        print(f"SPPFKELANEMA x shape: {x.shape}")
+        y = self.cv1(x)
+        print(f"SPPFKELANEMA cv1 y shape: {y.shape}")
+        y1 = self.branch1(y)
+        print(f"SPPFKELANEMA branch1 y1 shape: {y1.shape}")
+        y2 = self.branch2(y1)
+        print(f"SPPFKELANEMA branch2 y2 shape: {y2.shape}")
+        y3 = self.branch3(y2)
+        print(f"SPPFKELANEMA branch3 y3 shape: {y3.shape}")
+        y = torch.cat((y, y1, y2, y3), 1)
+        print(f"SPPFKELANEMA y shape: {y.shape}")
+        y = self.ema(y)
+        print(f"SPPFELANEMA ema shape {y.shape}")
         print(f"SPPFKELANEMA end")
 
         return y
@@ -1610,16 +1666,16 @@ class FPN(nn.Module):
         return outputs
 
 class FRM(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, out_channels):
         super(FRM, self).__init__()
         
         # Depthwise convolution for local feature extraction
         self.dw_conv = DWConv(in_channels, in_channels, k=3, s=1)
 
         # Channel Attention Components
-        self.channel_conv1 = nn.Conv2d(in_channels, in_channels//2, kernel_size=(1, 5), padding=(0, 2))
-        self.channel_conv2 = nn.Conv2d(in_channels // 2, in_channels,kernel_size=(5, 1), padding=(2, 0))
-        self.channel_bn = nn.BatchNorm2d(in_channels // 2)
+        self.channel_conv1 = nn.Conv2d(in_channels * 2, in_channels, kernel_size=(1, 5), padding=(0, 2))
+        self.channel_conv2 = nn.Conv2d(in_channels, in_channels, kernel_size=(5, 1), padding=(2, 0))
+        self.channel_bn = nn.BatchNorm2d(in_channels)
         
         # Spatial Attention Components
         self.spatial_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)
@@ -1629,37 +1685,73 @@ class FRM(nn.Module):
         
     def forward(self, x):
         # 1. Depthwise convolution
+        print("FRM start")
+        print(f"FRM input shape: {x.shape}")
         local_features = self.dw_conv(x)
+        print(f"FRM local_features shape: {local_features.shape}")
         
         # 2. Multi-scale pooling
         max_pool_h = F.adaptive_max_pool2d(x, (x.size(2), 1))  # Horizontal MaxPool
+        print(f"FRM max_pool_h shape: {max_pool_h.shape}")
         max_pool_v = F.adaptive_max_pool2d(x, (1, x.size(3)))  # Vertical MaxPool
+        print(f"FRM max_pool_v shape: {max_pool_v.shape}")
         avg_pool_h = F.adaptive_avg_pool2d(x, (x.size(2), 1))  # Horizontal AvgPool
+        print(f"FRM avg_pool_h shape: {avg_pool_h.shape}")
         avg_pool_v = F.adaptive_avg_pool2d(x, (1, x.size(3)))  # Vertical AvgPool
+        print(f"FRM avg_pool_v shape: {avg_pool_v.shape}")
         
         # Summation and concatenation
         max_pool = max_pool_h + max_pool_v
+        print(f"FRM max_pool shape: {max_pool.shape}")
         avg_pool = avg_pool_h + avg_pool_v
+        print(f"FRM avg_pool shape: {avg_pool.shape}")
         msff = torch.cat((avg_pool, max_pool), dim=1)
+        print(f"FRM msff shape: {msff.shape}")
         
         # 3. Channel Attention
         ca = F.relu(self.channel_bn(self.channel_conv1(msff)))
+        print(f"FRM ca conv1 bn relu shape: {ca.shape}")
         ca = self.sigmoid(self.channel_conv2(ca))
+        print(f"FRM ca conv2 sigmoid shape: {ca.shape}")
         
         # 4. Spatial Attention
         sa = torch.mean(msff, dim=1, keepdim=True)  # Global Average Pooling
+        print(f"FRM sa average shape: {sa.shape}")
         sa = self.sigmoid(self.spatial_conv(sa))
+        print(f"FRM sa conv sigmoid shape: {sa.shape}")
 
         # Channel Attention and Spatial Attention mul
-        weight = ca * sa 
+        weight = ca * sa
+        print(f"FRM weight shape: {weight.shape}")
 
         # DWCONV * Weight
         attention_features = local_features * weight
+        print(f"FRM attention_features shape: {attention_features.shape}")
         
         # 6. Residual connection
         refined_features = x + attention_features
+        print(f"FRM refined_features shape: {refined_features.shape}")
+        print("FRM end")
         
         return refined_features
 
+class GhostC3k2(C2f):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
 
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        """Initializes the C3k2 module, a faster CSP Bottleneck with 2 convolutions and optional C3k blocks."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            GhostC3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
+        )
+
+class GhostC3k(C3Ghost):
+    """C3k is a CSP bottleneck module with customizable kernel sizes for feature extraction in neural networks."""
+
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
+        """Initializes the C3k module with specified channels, number of layers, and configurations."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        c_ = int(c2 * e)  # hidden channels
+        # self.m = nn.Sequential(*(RepBottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+        self.m = nn.Sequential(*(Bottleneck(c_, c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
 
