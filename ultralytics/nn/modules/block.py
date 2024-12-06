@@ -19,6 +19,7 @@ __all__ = (
     "EMA",
     "EnhancedSPPF",
     "SPPFKELANEMA",
+    "SPPFKELAN",
     "C1",
     "C2",
     "C3",
@@ -57,6 +58,8 @@ __all__ = (
     "BottleneckWithSE",
     "EnhancedC3k",
     "EnhancedC3k2",
+    "GhostC3k2",
+    "FRM",
 )
 
 
@@ -1287,6 +1290,46 @@ class SPPFK(nn.Module):
         y = torch.cat(y, 1)
         return y
 
+class SPPFKELAN(nn.Module):
+    def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
+        """
+        Pyramid Pooling Module (PPM) for context aggregation across multiple scales.
+
+        Parameters:
+        - in_channels (int): Number of input channels.
+        - out_channels (int): Number of output channels after pooling and concatenation.
+        - kernel_sizes (list): List of pooling kernel sizes at different scales.
+        """
+        super().__init__()
+        self.c_ = c1 // 4
+        self.cv1 = Conv(c1, self.c_, 1, 1)
+        self.branch1 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[3, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1)
+        )
+        self.branch2 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[5, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1)
+        )
+        self.branch3 = nn.Sequential(
+            SPPFK(self.c_, k_sizes=[7, 5, 5]),
+            Conv(self.c_ * 4, self.c_, 1, 1)
+        )
+
+        # Convolution to match the output channels after concatenation
+
+    def forward(self, x):
+        """
+        Forward pass through Pyramid Pooling Module.
+        """
+        y = self.cv1(x)
+        y1 = self.branch1(y)
+        y2 = self.branch2(y1)
+        y3 = self.branch3(y2)
+        y = torch.cat((y, y1, y2, y3), 1)
+
+        return y
+    
 class SPPFKELANEMA(nn.Module):
     def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
         """
@@ -1378,3 +1421,73 @@ class EnhancedC3k(C3):
         super().__init__(c1, c2, n, shortcut, g, e)
         self.c_ = int(c2 * e)  # hidden channels
         self.m = nn.Sequential(*(BottleneckWithSE(self.c_, self.c_, shortcut, g, k=(k, k), e=1.0) for _ in range(n)))
+
+
+class FRM(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(FRM, self).__init__()
+        
+        # Depthwise convolution for local feature extraction
+        self.dw_conv = DWConv(in_channels, in_channels, k=3, s=1)
+
+        # Channel Attention Components
+        self.channel_conv1 = nn.Conv2d(in_channels * 2, in_channels, kernel_size=(1, 5), padding=(0, 2))
+        self.channel_conv2 = nn.Conv2d(in_channels, in_channels, kernel_size=(5, 1), padding=(2, 0))
+        self.channel_bn = nn.BatchNorm2d(in_channels)
+        
+        # Spatial Attention Components
+        self.spatial_conv = nn.Conv2d(1, 1, kernel_size=3, padding=1)
+        
+        # Sigmoid activation
+        self.sigmoid = nn.Sigmoid()
+        
+    def forward(self, x):
+        # 1. Depthwise convolution
+        local_features = self.dw_conv(x)
+        
+        # 2. Multi-scale pooling
+        max_pool_h = F.adaptive_max_pool2d(x, (x.size(2), 1))  # Horizontal MaxPool
+        max_pool_v = F.adaptive_max_pool2d(x, (1, x.size(3)))  # Vertical MaxPool
+        avg_pool_h = F.adaptive_avg_pool2d(x, (x.size(2), 1))  # Horizontal AvgPool
+        avg_pool_v = F.adaptive_avg_pool2d(x, (1, x.size(3)))  # Vertical AvgPool
+        
+        # Summation and concatenation
+        max_pool = max_pool_h + max_pool_v
+        avg_pool = avg_pool_h + avg_pool_v
+        msff = torch.cat((avg_pool, max_pool), dim=1)
+        
+        # 3. Channel Attention
+        ca = F.relu(self.channel_bn(self.channel_conv1(msff)))
+        ca = self.sigmoid(self.channel_conv2(ca))
+        
+        # 4. Spatial Attention
+        sa = torch.mean(msff, dim=1, keepdim=True)  # Global Average Pooling
+        sa = self.sigmoid(self.spatial_conv(sa))
+
+        # Channel Attention and Spatial Attention mul
+        weight = ca * sa
+
+        # DWCONV * Weight
+        attention_features = local_features * weight
+        
+        # 6. Residual connection
+        refined_features = x + attention_features
+        
+        return refined_features
+
+class GhostC3k2(C2f):
+    """Faster Implementation of CSP Bottleneck with 2 convolutions."""
+
+    def __init__(self, c1, c2, n=1, c3k=False, e=0.5, g=1, shortcut=True):
+        """Initializes the C3k2 module, a faster CSP Bottleneck with 2 convolutions and optional C3k blocks."""
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(
+            GhostC3k(self.c, self.c, 2, shortcut, g) if c3k else Bottleneck(self.c, self.c, shortcut, g) for _ in range(n)
+        )
+
+class GhostC3k(C3Ghost):
+    """C3k is a CSP bottleneck module with customizable kernel sizes for feature extraction in neural networks."""
+
+    def __init__(self, c1, c2, n=1, shortcut=True, g=1, e=0.5, k=3):
+        """Initializes the C3k module with specified channels, number of layers, and configurations."""
+        super().__init__(c1, c2, n, shortcut, g, e)
