@@ -16,8 +16,10 @@ __all__ = (
     "HGStem",
     "SPP",
     "SPPF",
+    "SPPFK",
     "AASSPP",
     "EnhancedSPPF",
+    "SPPFKELANEMA",
     "C1",
     "C2",
     "C3",
@@ -1368,7 +1370,82 @@ class EMA(nn.Module):
 
         # Return the reweighted tensor
         return x_reweighted
+    
+class SPPFK(nn.Module):
+    """Using single kernel size for spatial pyramid pooling."""
+    def __init__(self, c1, k):
+        super().__init__()
+        self.cv = Conv(c1, c1, 1, 1)
+        self.pool = nn.MaxPool2d(kernel_size=k, stride=1, padding=k // 2)
 
+    def forward(self, x):
+        print(f"SPPFK start")
+        print(f"SPPFK x shape: {x.shape}")
+        y = [self.cv(x)]
+        print(f"SPPFK cv1 y shape: {y[0].shape}")
+        pools = [self.pool(y[-1]) for _ in range(3)]
+        for i in range(len(pools)):
+            print(f"SPPFK pool {i} shape: {pools[i].shape}")
+        y.extend(pools)
+        y = torch.cat(y, 1)
+        print(f"SPPFK y shape: {y.shape}")
+        print(f"SPPFK end")
+        return y
+
+class SPPFKELANEMA(nn.Module):
+    def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
+        """
+        Pyramid Pooling Module (PPM) for context aggregation across multiple scales.
+
+        Parameters:
+        - in_channels (int): Number of input channels.
+        - out_channels (int): Number of output channels after pooling and concatenation.
+        - kernel_sizes (list): List of pooling kernel sizes at different scales.
+        """
+        super().__init__()
+        self.c_ = c1 // 2
+        self.cv1 = Conv(c1, self.c_, 1, 1)
+        self.branch1 = nn.Sequential(
+            Conv(self.c_, self.c_, 1, 1),
+            SPPFK(self.c_, k_sizes[0])
+        )
+        self.branch2 = nn.Sequential(
+            Conv(self.c_, self.c_, 1, 1),
+            SPPFK(self.c_, k_sizes[1])
+        )
+        self.branch3 = nn.Sequential(
+            Conv(self.c_, self.c_, 1, 1),
+            SPPFK(self.c_, k_sizes[2])
+        )
+        self.cv2 = Conv(self.c_ * 13, c2, 1, 1)
+        self.ema = EMA(c2)
+
+        # Convolution to match the output channels after concatenation
+
+    def forward(self, x):
+        """
+        Forward pass through Pyramid Pooling Module.
+        """
+        print(f"SPPFKELANEMA start")
+        print(f"SPPFKELANEMA x shape: {x.shape}")
+        y = self.cv1(x)
+        print(f"SPPFKELANEMA cv1 y shape: {y.shape}")
+        y1 = self.branch1(y)
+        print(f"SPPFKELANEMA branch1 y1 shape: {y1.shape}")
+        y2 = self.branch2(y)
+        print(f"SPPFKELANEMA branch2 y2 shape: {y2.shape}")
+        y3 = self.branch3(y)
+        print(f"SPPFKELANEMA branch3 y3 shape: {y3.shape}")
+        y = torch.cat((y, y1, y2, y3), 1)
+        print(f"SPPFKELANEMA y shape: {y.shape}")
+        y = self.cv2(y)
+        print(f"SPPFKELANEMA cv2 y shape: {y.shape}")
+        y = self.ema(y)
+        print(f"SPPFKELANEMA ema y shape: {y.shape}")
+        print(f"SPPFKELANEMA end")
+
+        return y
+    
 class EnhancedSPPF(nn.Module):
     def __init__(self, c1, c2, k_sizes=[3, 5, 7]):
         """
