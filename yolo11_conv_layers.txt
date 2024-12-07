@@ -3,6 +3,7 @@ $ yolo train model=ultralytics/cfg/models/11/yolo11.yaml data=ultralytics/cfg/da
 
 sahil@DESKTOP-80OIBSK MINGW64 ~/Desktop/Python/ultalytics/ultralytics-improved (enhancedc3k2-branch)
 $ yolo train model=ultralytics/cfg/models/11/yolo11.yaml data=ultralytics/cfg/datasets/rsud20k-sahil.yaml epochs=100 batch=16 imgsz=640 pretrained=False verbose=True
+yolo train model=ultralytics/cfg/models/11/yolo11_enhanced.yaml data=ultralytics/cfg/datasets/rsud20k-sahil.yaml epochs=10 batch=16 imgsz=640 pretrained=False verbose=True seed=42
 
 WARNING ⚠️ no model scale passed. Assuming scale='n'.
 Conv start

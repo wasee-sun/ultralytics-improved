@@ -1253,7 +1253,7 @@ class AASSPP(nn.Module):
         return out
 
 class EMA(nn.Module):
-    def __init__(self, in_channels, groups=4):
+    def __init__(self, channels, groups=32):
         """
         Efficient Multi-scale Attention block with cross-spatial learning.
 
@@ -1263,14 +1263,21 @@ class EMA(nn.Module):
         """
         super(EMA, self).__init__()
         self.groups = groups
-        self.group_channels = in_channels // groups
+        assert channels // self.groups > 0
+        self.group_channels = channels // self.groups
+        self.softmax = nn.Softmax(dim=-1)
+        
+        # Pooling layers
+        self.avg_grp_pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.pool_h = nn.AdaptiveAvgPool2d((1, None))
+        self.pool_w = nn.AdaptiveAvgPool2d((None, 1))
 
         # Convolution layer for re-weighting
-        self.conv_1_1 = Conv(in_channels, in_channels, k=1, s=1, p=0)
-        self.conv_3_3 = Conv(in_channels, in_channels, k=3, s=1, p=1, g=groups)
+        self.conv_1_1 = nn.Conv2d(channels // self.groups, channels // self.groups, kernel_size=1, stride=1, padding=0)
+        self.conv_3_3 = nn.Conv2d(channels // self.groups, channels // self.groups, kernel_size=1, stride=1, padding=0)
 
         # Group normalization
-        self.group_norm = nn.GroupNorm(groups, in_channels)
+        self.group_norm = nn.GroupNorm(channels // self.groups, channels // self.groups)
 
     def forward(self, x):
         """
@@ -1285,22 +1292,16 @@ class EMA(nn.Module):
         print("EMA start")
         print(f"EMA input shape: {x.shape}")
         B, C, H, W = x.shape # 1, 256, 8, 8
-        g = self.groups # 4
-        Cg = self.group_channels # 64
+        x_group = x.reshape(B * self.groups, self.group_channels, H, W)
+        print(f"EMA x_group shape: {x_group.shape}")
 
-        # Conv 3X3
-        conv_3_3 = self.conv_3_3(x)
-        print(f"EMA conv_3_3 shape: {conv_3_3.shape}")
-
-        x_avg_pool = F.adaptive_avg_pool2d(x, output_size=(1, W))  # (B, C, 1, W)
+        x_avg_pool = self.pool_h(x_group)  # (B, C, 1, W)
         print(f"EMA x_avg_pool shape: {x_avg_pool.shape}")
-        y_avg_pool = F.adaptive_avg_pool2d(x, output_size=(H, 1))  # (B, C, H, 1)
+        y_avg_pool = self.pool_w(x_group)  # (B, C, H, 1)
         print(f"EMA y_avg_pool shape: {y_avg_pool.shape}")
         y_avg_pool = y_avg_pool.permute(0, 1, 3, 2)  # (B, C, 1, H)
-
-        # x_groups = x.view(B, g, Cg, H, W)  # (B, g, Cg, H, W)
-        # print(f"EMA x_groups shape: {x_groups.shape}")
-
+        print(f"EMA y_avg_pool permute shape: {y_avg_pool.shape}")
+        
         #contating x1 and y
         concat_pool = torch.cat([x_avg_pool, y_avg_pool], dim=3)  # (B, C, H, W+H)
         print(f"EMA concat_pool shape: {concat_pool.shape}")
@@ -1310,72 +1311,70 @@ class EMA(nn.Module):
         print(f"EMA conv1x1 shape: {conv1x1.shape}")
 
         #Split the conv1x1 into two equal parts
-        x_attention, y_attention = torch.split(conv1x1, [W, H], dim=-1)
+        x_attention, y_attention = torch.split(conv1x1, [H, W], dim=3)
         print(f"EMA x_attention shape: {x_attention.shape}") # (B, C, 1, W)
         print(f"EMA y_attention shape: {y_attention.shape}") # (B, C, 1, H)
 
         #Sigmoid
         x_attention = torch.sigmoid(x_attention) # (B, C, 1, W)
+        print(f"EMA x_attention sigmoid shape: {x_attention.shape}")
+        y_attention = y_attention.permute(0, 1, 3, 2)
         y_attention = torch.sigmoid(y_attention) # (B, C, 1, H)
-
-        x_attention = x_attention.unsqueeze(2) # (B, C, 1, 1, W)
-        y_attention = y_attention.permute(0, 1, 3, 2).unsqueeze(3) # (B, C, H, 1, 1)
-        print(f"EMA x_attention unsqueeze shape: {x_attention.shape}")
-        print(f"EMA y_attention unsqueeze shape: {y_attention.shape}")
-
-        #Reweight
-        x_reweighted = x * x_attention.squeeze(2) # (B, C, H, W)
-        x_reweighted = x * y_attention.squeeze(3) # (B, C, H, W)
-        print(f"EMA x shape: {x_reweighted.shape}")
+        print(f"EMA y_attention sigmoid shape: {y_attention.shape}")
+        
+        # Reweight
+        x_reweighted = x_group * x_attention * y_attention
 
         #Group norm
-        x_GN_reweighted = self.group_norm(x_reweighted) # (B, C, H, W)
-        print(f"EMA x_GN_reweighted shape: {x_GN_reweighted.shape}")
+        x1 = self.group_norm(x_reweighted) # (B, C, H, W)
+        print(f"EMA x_GN_reweighted shape: {x1.shape}")
+        x2 = self.conv_3_3(x_group) # (B, C, H, W)
+        print(f"EMA conv_3_3 shape: {x2.shape}")
 
-        #Group formation
-        x_groups = x_GN_reweighted.view(B, g, Cg, H, W)  # (B, g, Cg, H, W)
-        print(f"EMA x_groups shape: {x_groups.shape}")
-        conv_3_3_groups = conv_3_3.view(B, g, Cg, H, W)
-        print(f"EMA conv_3_3_view shape: {conv_3_3_groups.shape}")
-
-        #Global pool
-        x_global_pool = F.adaptive_avg_pool2d(x_groups, output_size=(1, 1))  # (B, g, Cg, 1, 1)
-        print(f"EMA x_global_pool shape: {x_global_pool.shape}")
-        conv_3_3_pool = F.adaptive_avg_pool2d(conv_3_3_groups, output_size=(1, 1))  # (B, g, Cg, 1, 1)
+        #X_pooling
+        x_avg_grp_pool = self.avg_grp_pool(x1)  # (B, g, Cg, 1, 1)
+        print(f"EMA x_global_pool shape: {x_avg_grp_pool.shape}")
+        x_avg_grp_pool_reshaped = x_avg_grp_pool.reshape(B * self.groups, -1, 1).permute(0, 2, 1)
+        print(f"EMA x_avg_grp_pool_reshaped permute shape: {x_avg_grp_pool_reshaped.shape}")
+        x_avg_grp_pool_softmax = self.softmax(x_avg_grp_pool_reshaped)
+        print(f"EMA x_avg_grp_pool_softmax shape: {x_avg_grp_pool_softmax.shape}")
+        
+        # Conv_3X3 pool
+        conv_3_3_pool = self.avg_grp_pool(x2)  # (B, g, Cg, 1, 1)
         print(f"EMA conv_3_3_pool shape: {conv_3_3_pool.shape}")
-
-        #Softmax
-        x_g_pool_softmax = F.softmax(x_global_pool, dim=1)  # (B, g, Cg, 1, 1)
-        print(f"EMA x_g_pool_softmax shape: {x_g_pool_softmax.shape}")
-        conv_3_3_pool_softmax = F.softmax(conv_3_3_pool, dim=1)  # (B, g, Cg, 1, 1)
+        conv_3_3_pool_reshaped = conv_3_3_pool.reshape(B * self.groups, -1, 1).permute(0, 2, 1)
+        print(f"EMA conv_3_3_pool_reshaped permute shape: {conv_3_3_pool_reshaped.shape}")
+        conv_3_3_pool_softmax = self.softmax(conv_3_3_pool_reshaped)
         print(f"EMA conv_3_3_pool_softmax shape: {conv_3_3_pool_softmax.shape}")
 
+        # Reshape for matmul
+        x1_reshaped = x1.reshape(B * self.groups, self.group_channels, -1)
+        print(f"EMA x1_reshaped shape: {x1_reshaped.shape}")
+        x2_reshaped = x2.reshape(B * self.groups, self.group_channels, -1)
+        print(f"EMA x2_reshaped shape: {x2_reshaped.shape}")
+
         #Matmul
-        x_g_pool_softmax_reshaped = x_g_pool_softmax.expand_as(x_groups)  # (B, g, Cg, H, W)
-        print(f"EMA x_g_pool_softmax_reshaped shape: {x_g_pool_softmax_reshaped.shape}")
-        matmul_1 = x_g_pool_softmax_reshaped * conv_3_3_groups
+        matmul_1 = torch.matmul(x_avg_grp_pool_softmax, x2_reshaped)
         print(f"EMA matmul_1 shape: {matmul_1.shape}")
-        conv_3_3_pool_reshaped = conv_3_3_pool_softmax.expand_as(conv_3_3_groups)  # (B, g, Cg, H, W)
-        print(f"EMA conv_3_3_pool_reshaped shape: {conv_3_3_pool_reshaped.shape}")
-        matmul_2 = conv_3_3_pool_reshaped * x_groups
+        matmul_2 = torch.matmul(conv_3_3_pool_softmax, x1_reshaped)
         print(f"EMA matmul_2 shape: {matmul_2.shape}")
 
         #Concat matmul and sigmoid
         spatial_attention = matmul_1 + matmul_2  # (B, g, Cg, H, W)
         print(f"EMA spatial_attention shape: {spatial_attention.shape}")
-        spatial_attention = torch.sigmoid(spatial_attention)
-        print(f"EMA spatial_attention shape: {spatial_attention.shape}")
+        spatial_attention_reshaped = spatial_attention.reshape(B * self.groups, 1, H, W)
+        print(f"EMA spatial_attention shape: {spatial_attention_reshaped.shape}")
+        spatial_attention_sigmoid = torch.sigmoid(spatial_attention_reshaped)
+        print(f"EMA spatial_attention_sigmoid shape: {spatial_attention_sigmoid.shape}")
 
-        # Adjust sigmoid shape
-        spatial_attention = spatial_attention.view(B, g * Cg, H, W)
-        print(f"EMA spatial_attention shape: {spatial_attention.shape}")
-
-        # Reweight sigmoid matmul
-        x_reweighted = x * spatial_attention  # Element-wise multiplication (broadcasting across channels)
-        print(f"EMA Reweighted x shape: {x_reweighted.shape}")
+        # Re weight with Sigmoid
+        spatial_attention_reweighted = x_group * spatial_attention_sigmoid
+        print(f"EMA spatial_attention_reweighted shape: {spatial_attention_reweighted.shape}")
+        spatial_attention_reweighted_reshaped = spatial_attention_reweighted.reshape(B, C, H, W)
+        print(f"EMA spatial_attention_reweighted_reshaped shape: {spatial_attention_reweighted_reshaped.shape}")  
 
         # Return the reweighted tensor
-        return x_reweighted
+        return spatial_attention_reweighted_reshaped
     
 class SPPFK(nn.Module):
     """Using single kernel size for spatial pyramid pooling."""
