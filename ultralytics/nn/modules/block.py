@@ -1439,15 +1439,15 @@ class SPPFKELANEMA(nn.Module):
         self.c_ = c1 // 4
         self.cv1 = Conv(c1, self.c_, 1, 1)
         self.branch1 = nn.Sequential(
-            SPPFK(self.c_, k_sizes=[3, 5, 5]),
+            SPPFK(self.c_, k_sizes=[3, 5, 7]),
             Conv(self.c_ * 4, self.c_, 1, 1)
         )
         self.branch2 = nn.Sequential(
-            SPPFK(self.c_, k_sizes=[5, 5, 5]),
+            SPPFK(self.c_, k_sizes=[3, 5, 7]),
             Conv(self.c_ * 4, self.c_, 1, 1)
         )
         self.branch3 = nn.Sequential(
-            SPPFK(self.c_, k_sizes=[7, 5, 5]),
+            SPPFK(self.c_, k_sizes=[3, 5, 7]),
             Conv(self.c_ * 4, self.c_, 1, 1)
         )
         self.ema = EMA(c2)
