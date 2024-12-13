@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+path: ../datasets/i2.v9i.yolov11
+nc: 25
+names: ['Ambulance', 'Auto-Rickshaw', 'Bus', 'Car', 'Cargo-Van', 'Cng', 'Covered-Van', 'Cycle', 'Jeep', 'Leguna', 'Lorry', 'Microbus', 'Minibus', 'Motor-Cycle', 'Oil Tanker', 'Person', 'Pick-Up', 'Rickshaw', 'Scoty', 'Special-Purpose-Vehicle', 'Tanker', 'Taxicab', 'Tractor', 'Truck', 'Van']
+
+roboflow:
+  workspace: data-48lkx
+  project: i2-waurd
+  version: 9
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/data-48lkx/i2-waurd/dataset/9
